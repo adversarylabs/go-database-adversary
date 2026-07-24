@@ -1,0 +1,1 @@
+{"risk":"high","findings":[{"ruleId":"go-database.transaction-lifecycle","severity":"high","evidenceCount":1},{"ruleId":"go-database.rows-lifecycle","severity":"high","evidenceCount":1},{"ruleId":"go-database.contextless-query","severity":"medium","evidenceCount":1}],"positiveKeys":[],"ship":false}
