@@ -1,0 +1,33 @@
+name: go-database
+version: 0.0.1
+description: Reviews Go database code for transaction, pool, query, cancellation, and migration safety.
+
+triggers:
+  manual: true
+  files_changed:
+    - "**/*.go"
+    - "**/*.sql"
+
+detection:
+  files:
+    - "**/*.go"
+    - "**/*.sql"
+
+runtime:
+  name: node
+  version: "22"
+  command:
+    - dist/index.js
+
+permissions:
+  enforcement: advisory
+  filesystem:
+    read:
+      - .
+    write: []
+  network: false
+  environment:
+    allow: []
+
+findings:
+  format: adversary.review.v1
