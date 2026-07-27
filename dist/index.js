@@ -16451,7 +16451,7 @@ var domain = {
       signals: [
         ...rows,
         ...tx,
-        ...lineSignals(file, "go-database.contextless-query", /\.(?:Query|Exec)\s*\(/, () => "This database operation has no cancellation context.")
+        ...contextlessQuerySignals(file)
       ],
       positives: [
         ...positive(file, "go-database.rows-owned", /defer\s+rows\.Close\s*\(\)/, "Query rows are closed by their owning scope."),
@@ -16460,6 +16460,32 @@ var domain = {
     };
   }
 };
+function contextlessQuerySignals(file) {
+  if (file.path.endsWith("_test.go")) return [];
+  if (!hasDatabaseImport(file.current)) return [];
+  return lineSignals(
+    file,
+    "go-database.contextless-query",
+    /\.(?:Query|Exec)\s*\(/,
+    () => "This database operation has no cancellation context."
+  ).filter((signal) => isLikelyDatabaseQueryOrExec(signal.snippet, file.current));
+}
+function hasDatabaseImport(source) {
+  return /"(?:database\/sql|github\.com\/(?:lib\/pq|jackc\/pgx(?:\/v\d+)?|jmoiron\/sqlx|go-sql-driver\/mysql|mattn\/go-sqlite3|uptrace\/bun|go-gorm\/gorm)|gorm\.io\/gorm|entgo\.io\/ent)/.test(
+    source
+  );
+}
+function isLikelyDatabaseQueryOrExec(line, fileSource = "") {
+  const snippet = line.trim();
+  if (/\.URL\.Query\s*\(/.test(snippet)) return false;
+  if (/\bQuery\s*\(\s*\)/.test(snippet)) return false;
+  if (/\burl\.Values\b/.test(snippet)) return false;
+  if (/\.Query\s*\(\s*\)\s*\.\s*(?:Get|Set|Add|Del|Encode|Has)\s*\(/.test(snippet)) return false;
+  const looksLikeSqlCall = /\.(?:Query|Exec)\s*\(\s*(?:`[^`]*`|"[^"]*"|'[A-Za-z]|\w+\s*,)/.test(snippet) || /\b(?:db|tx|conn|stmt|sqlDB|pool|queries|rawDB)\s*\.\s*(?:Query|Exec)\s*\(/i.test(snippet);
+  if (!looksLikeSqlCall) return false;
+  if (fileSource && !hasDatabaseImport(fileSource)) return false;
+  return true;
+}
 
 // src/parser.ts
 import { existsSync } from "node:fs";
@@ -20686,10 +20712,16 @@ var GO_DATABASE_MODEL_PROMPT = `You are reviewing Go database access for transac
 
 Authority:
 - rows and transaction ownership (Close/Commit/Rollback)
-- context-aware Query/Exec usage
+- context-aware database/sql Query/Exec (and known ORMs/drivers: pgx, sqlx, GORM, Bun, sqlc)
 - pool configuration and connection lifecycle
 - migrations only when they create operational risk visible in the change
 
+Hard exclusions \u2014 NEVER treat these as database operations:
+- net/http or net/url: r.URL.Query(), req.URL.Query(), Query().Get/Set/Add, url.Values
+- HTTP request parsing, query-string filters, or form values
+- *_test.go fixtures that only exercise URL query maps
+
+If you cannot tell SQL from HTTP query strings, emit no observation.
 Do NOT review generic Go style, HTTP, or CLI UX.
 Prefer silence over speculation. Zero to six observations. Cite only evidenceIds.
 Do not restate deterministic signals without added judgment.
@@ -21074,7 +21106,7 @@ function addPositives(ctx, analysis) {
 function createApp() {
   const app = new Adversary({
     name: domain.name,
-    version: "0.0.5",
+    version: "0.0.6",
     review: { maximumFindings: 5, minimumConfidence: "medium" }
   });
   app.rule(`${domain.name}.review`, async (ctx) => {

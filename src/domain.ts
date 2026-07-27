@@ -1,5 +1,5 @@
 import { contentSignal, lineSignals, positive } from "./signals.js";
-import { type DomainDefinition } from "./types.js";
+import { type DomainDefinition, type SourceRevision } from "./types.js";
 
 export const domain: DomainDefinition = {
   name: "go-database",
@@ -59,7 +59,7 @@ export const domain: DomainDefinition = {
       signals: [
         ...rows,
         ...tx,
-        ...lineSignals(file, "go-database.contextless-query", /\.(?:Query|Exec)\s*\(/, () => "This database operation has no cancellation context."),
+        ...contextlessQuerySignals(file),
       ],
       positives: [
         ...positive(file, "go-database.rows-owned", /defer\s+rows\.Close\s*\(\)/, "Query rows are closed by their owning scope."),
@@ -68,3 +68,49 @@ export const domain: DomainDefinition = {
     };
   },
 };
+
+/**
+ * Only flag real database/sql (and known driver/ORM) Query/Exec calls.
+ * net/http URL query strings use r.URL.Query() / Query().Get — never DB APIs.
+ * Prefer silence when the call site is ambiguous.
+ */
+function contextlessQuerySignals(file: SourceRevision) {
+  // Test files are almost always URL fixtures or mocks for this false-positive class.
+  if (file.path.endsWith("_test.go")) return [];
+  if (!hasDatabaseImport(file.current)) return [];
+
+  return lineSignals(
+    file,
+    "go-database.contextless-query",
+    /\.(?:Query|Exec)\s*\(/,
+    () => "This database operation has no cancellation context.",
+  ).filter((signal) => isLikelyDatabaseQueryOrExec(signal.snippet, file.current));
+}
+
+function hasDatabaseImport(source: string): boolean {
+  return /"(?:database\/sql|github\.com\/(?:lib\/pq|jackc\/pgx(?:\/v\d+)?|jmoiron\/sqlx|go-sql-driver\/mysql|mattn\/go-sqlite3|uptrace\/bun|go-gorm\/gorm)|gorm\.io\/gorm|entgo\.io\/ent)/.test(
+    source,
+  );
+}
+
+export function isLikelyDatabaseQueryOrExec(line: string, fileSource = ""): boolean {
+  const snippet = line.trim();
+  // HTTP / net/url query-string APIs (zero-arg Query, chained Get/Encode, URL.Query).
+  if (/\.URL\.Query\s*\(/.test(snippet)) return false;
+  if (/\bQuery\s*\(\s*\)/.test(snippet)) return false;
+  if (/\burl\.Values\b/.test(snippet)) return false;
+  if (/\.Query\s*\(\s*\)\s*\.\s*(?:Get|Set|Add|Del|Encode|Has)\s*\(/.test(snippet)) return false;
+
+  // database/sql Query/Exec take a query string (or ctx for *Context). Contextless
+  // forms are Query(query, args...) / Exec(query, args...).
+  const looksLikeSqlCall =
+    /\.(?:Query|Exec)\s*\(\s*(?:`[^`]*`|"[^"]*"|'[A-Za-z]|\w+\s*,)/.test(snippet) ||
+    /\b(?:db|tx|conn|stmt|sqlDB|pool|queries|rawDB)\s*\.\s*(?:Query|Exec)\s*\(/i.test(snippet);
+
+  if (!looksLikeSqlCall) return false;
+
+  // Extra guard: file without DB imports should never reach here, but keep silence.
+  if (fileSource && !hasDatabaseImport(fileSource)) return false;
+
+  return true;
+}

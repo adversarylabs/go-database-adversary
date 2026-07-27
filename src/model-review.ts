@@ -19,10 +19,16 @@ export const GO_DATABASE_MODEL_PROMPT = `You are reviewing Go database access fo
 
 Authority:
 - rows and transaction ownership (Close/Commit/Rollback)
-- context-aware Query/Exec usage
+- context-aware database/sql Query/Exec (and known ORMs/drivers: pgx, sqlx, GORM, Bun, sqlc)
 - pool configuration and connection lifecycle
 - migrations only when they create operational risk visible in the change
 
+Hard exclusions — NEVER treat these as database operations:
+- net/http or net/url: r.URL.Query(), req.URL.Query(), Query().Get/Set/Add, url.Values
+- HTTP request parsing, query-string filters, or form values
+- *_test.go fixtures that only exercise URL query maps
+
+If you cannot tell SQL from HTTP query strings, emit no observation.
 Do NOT review generic Go style, HTTP, or CLI UX.
 Prefer silence over speculation. Zero to six observations. Cite only evidenceIds.
 Do not restate deterministic signals without added judgment.
