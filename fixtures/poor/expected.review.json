@@ -1,1 +1,1 @@
-{"risk":"high","findings":[{"ruleId":"go-database.rows-lifecycle","severity":"high","evidenceCount":1}],"positiveKeys":[],"ship":false}
+{"risk":"critical","findings":[{"ruleId":"go-database.rows-lifecycle","severity":"critical","evidenceCount":1}],"positiveKeys":[],"ship":false}

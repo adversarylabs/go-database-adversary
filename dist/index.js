@@ -16409,12 +16409,12 @@ var domain = {
       title: "Query rows are not closed by their owner",
       concern: "unclosed database query rows",
       category: "reliability",
-      severity: "high",
+      severity: "critical",
       confidence: "high",
-      summary: (count) => `${count} query result${count === 1 ? "" : "s"} have no matching Close lifecycle.`,
-      whyItMatters: "Rows retain a database connection until closed or fully consumed.",
-      impact: "Early returns and scan failures can exhaust the pool and stall unrelated requests.",
-      recommendation: "Check the query error and immediately defer rows.Close in the same owning scope."
+      summary: (count) => `${count} multi-row query result${count === 1 ? "" : "s"} (*sql.Rows) have no deferred Close in the owning scope.`,
+      whyItMatters: "Query/QueryContext return *sql.Rows that hold a pool connection until Close; forgetting defer Close is a classic connection-pool leak.",
+      impact: "Early returns, scan errors, and forgotten Close exhaust the connection pool and stall the whole process under load.",
+      recommendation: "After a successful Query/QueryContext, immediately `defer rows.Close()` (or close that variable) in the same function before scanning."
     },
     {
       id: "go-database.transaction-lifecycle",
@@ -16445,21 +16445,173 @@ var domain = {
   approvalSummary: "I would approve the reviewed database lifecycle and transaction behavior.",
   analyze(file) {
     if (!file.path.endsWith(".go")) return { signals: [], positives: [] };
-    const rows = /\brows\s*,\s*err\s*:=\s*\w+\.QueryContext\s*\(/.test(file.current) && !/defer\s+rows\.Close\s*\(\)/.test(file.current) ? contentSignal(file, "go-database.rows-lifecycle", /\brows\s*,\s*err\s*:=\s*\w+\.QueryContext\s*\(/, "The rows owner does not defer rows.Close.") : [];
     const tx = /\btx\s*,\s*err\s*:=\s*\w+\.Begin(?:Tx)?\s*\(/.test(file.current) && !/defer\s+tx\.Rollback\s*\(\)/.test(file.current) ? contentSignal(file, "go-database.transaction-lifecycle", /\btx\s*,\s*err\s*:=\s*\w+\.Begin(?:Tx)?\s*\(/, "The transaction owner has no deferred rollback.") : [];
     return {
       signals: [
-        ...rows,
+        ...rowsLifecycleSignals(file),
         ...tx,
         ...contextlessQuerySignals(file)
       ],
       positives: [
-        ...positive(file, "go-database.rows-owned", /defer\s+rows\.Close\s*\(\)/, "Query rows are closed by their owning scope."),
+        ...positive(
+          file,
+          "go-database.rows-owned",
+          /^\s*defer\s+\w+\.Close\s*\(/,
+          "Query rows are closed by their owning scope."
+        ),
         ...positive(file, "go-database.rollback-owned", /defer\s+tx\.Rollback\s*\(\)/, "The transaction has rollback coverage for every early return.")
       ]
     };
   }
 };
+function rowsLifecycleSignals(file) {
+  if (file.path.endsWith("_test.go")) return [];
+  const source = file.current;
+  const assignRe = /\b([A-Za-z_]\w*)\s*,\s*(?:err|_)\s*:?=\s*[^\n;]*?\.(?:Query|QueryContext|Queryx|QueryxContext)\s*\(/g;
+  const signals = [];
+  let match;
+  while ((match = assignRe.exec(source)) !== null) {
+    const varName = match[1] ?? "";
+    if (varName === "" || varName === "_") continue;
+    const lineText = source.slice(0, match.index).split("\n").pop() + match[0];
+    if (/\.URL\.Query\s*\(/.test(lineText) || /\bQuery\s*\(\s*\)/.test(match[0])) continue;
+    if (hasDeferredRowsClose(source, match.index ?? 0, varName)) continue;
+    const line = source.slice(0, match.index ?? 0).split("\n").length;
+    signals.push({
+      ruleId: "go-database.rows-lifecycle",
+      path: file.path,
+      line,
+      message: `Multi-row query result "${varName}" is never defer-closed in this function; the pool connection stays checked out.`,
+      snippet: (match[0] ?? "").trim().slice(0, 300),
+      data: { variable: varName }
+    });
+  }
+  return signals;
+}
+function hasDeferredRowsClose(source, assignIndex, varName) {
+  const rest = stripGoComments(source.slice(assignIndex));
+  const nextFunc = rest.search(/\nfunc\s+/);
+  const scope = nextFunc === -1 ? rest : rest.slice(0, nextFunc);
+  const escaped = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`\\bdefer\\s+${escaped}\\.Close\\s*\\(`).test(scope)) return true;
+  if (new RegExp(
+    `\\bdefer\\s+func\\s*\\([^)]*\\)\\s*\\{[\\s\\S]{0,200}?\\b${escaped}\\.Close\\s*\\(`
+  ).test(scope)) {
+    return true;
+  }
+  if (new RegExp(
+    `\\bif\\s+${escaped}\\s*!=\\s*nil\\s*\\{[\\s\\S]{0,80}?\\bdefer\\s+${escaped}\\.Close\\s*\\(`
+  ).test(scope)) {
+    return true;
+  }
+  return false;
+}
+function stripGoComments(source) {
+  let out2 = "";
+  let i2 = 0;
+  let inLine = false;
+  let inBlock = false;
+  let inRaw = false;
+  let inInterp = false;
+  let inChar = false;
+  let escape2 = false;
+  while (i2 < source.length) {
+    const ch = source[i2];
+    const next = source[i2 + 1];
+    if (inLine) {
+      if (ch === "\n") {
+        inLine = false;
+        out2 += "\n";
+      } else {
+        out2 += " ";
+      }
+      i2 += 1;
+      continue;
+    }
+    if (inBlock) {
+      if (ch === "*" && next === "/") {
+        inBlock = false;
+        out2 += "  ";
+        i2 += 2;
+        continue;
+      }
+      out2 += ch === "\n" ? "\n" : " ";
+      i2 += 1;
+      continue;
+    }
+    if (inRaw) {
+      out2 += ch;
+      if (ch === "`") inRaw = false;
+      i2 += 1;
+      continue;
+    }
+    if (inInterp) {
+      out2 += ch;
+      if (escape2) {
+        escape2 = false;
+        i2 += 1;
+        continue;
+      }
+      if (ch === "\\") {
+        escape2 = true;
+        i2 += 1;
+        continue;
+      }
+      if (ch === '"') inInterp = false;
+      i2 += 1;
+      continue;
+    }
+    if (inChar) {
+      out2 += ch;
+      if (escape2) {
+        escape2 = false;
+        i2 += 1;
+        continue;
+      }
+      if (ch === "\\") {
+        escape2 = true;
+        i2 += 1;
+        continue;
+      }
+      if (ch === "'") inChar = false;
+      i2 += 1;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLine = true;
+      out2 += "  ";
+      i2 += 2;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlock = true;
+      out2 += "  ";
+      i2 += 2;
+      continue;
+    }
+    if (ch === "`") {
+      inRaw = true;
+      out2 += ch;
+      i2 += 1;
+      continue;
+    }
+    if (ch === '"') {
+      inInterp = true;
+      out2 += ch;
+      i2 += 1;
+      continue;
+    }
+    if (ch === "'") {
+      inChar = true;
+      out2 += ch;
+      i2 += 1;
+      continue;
+    }
+    out2 += ch;
+    i2 += 1;
+  }
+  return out2;
+}
 function contextlessQuerySignals(file) {
   if (file.path.endsWith("_test.go")) return [];
   if (!hasDatabaseImport(file.current)) return [];
@@ -20711,10 +20863,14 @@ var MAX_MODEL_OBSERVATIONS = 6;
 var GO_DATABASE_MODEL_PROMPT = `You are reviewing Go database access for transaction, rows, pool, and context lifecycle correctness.
 
 Authority:
-- rows and transaction ownership (Close/Commit/Rollback)
+- rows and transaction ownership (Close/Commit/Rollback) \u2014 CRITICAL when Query/QueryContext
+  returns multi-row *sql.Rows (or sqlx/pgx Rows) without defer rows.Close() in the owner
 - context-aware database/sql Query/Exec (and known ORMs/drivers: pgx, sqlx, GORM, Bun, sqlc)
 - pool configuration and connection lifecycle
 - migrations only when they create operational risk visible in the change
+
+Emphasize the classic leak: selecting many rows into a variable then forgetting defer Close.
+QueryRow/*Row do not need Close; multi-row Query/QueryContext do.
 
 Hard exclusions \u2014 NEVER treat these as database operations:
 - net/http or net/url: r.URL.Query(), req.URL.Query(), Query().Get/Set/Add, url.Values
@@ -21106,7 +21262,7 @@ function addPositives(ctx, analysis) {
 function createApp() {
   const app = new Adversary({
     name: domain.name,
-    version: "0.0.6",
+    version: "0.0.7",
     review: { maximumFindings: 5, minimumConfidence: "medium" }
   });
   app.rule(`${domain.name}.review`, async (ctx) => {

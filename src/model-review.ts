@@ -18,10 +18,14 @@ const MAX_MODEL_OBSERVATIONS = 6;
 export const GO_DATABASE_MODEL_PROMPT = `You are reviewing Go database access for transaction, rows, pool, and context lifecycle correctness.
 
 Authority:
-- rows and transaction ownership (Close/Commit/Rollback)
+- rows and transaction ownership (Close/Commit/Rollback) — CRITICAL when Query/QueryContext
+  returns multi-row *sql.Rows (or sqlx/pgx Rows) without defer rows.Close() in the owner
 - context-aware database/sql Query/Exec (and known ORMs/drivers: pgx, sqlx, GORM, Bun, sqlc)
 - pool configuration and connection lifecycle
 - migrations only when they create operational risk visible in the change
+
+Emphasize the classic leak: selecting many rows into a variable then forgetting defer Close.
+QueryRow/*Row do not need Close; multi-row Query/QueryContext do.
 
 Hard exclusions — NEVER treat these as database operations:
 - net/http or net/url: r.URL.Query(), req.URL.Query(), Query().Get/Set/Add, url.Values
