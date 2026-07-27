@@ -11,6 +11,7 @@ export const domain: DomainDefinition = {
     {
       id: "go-database.rows-lifecycle",
       title: "Query rows are not closed by their owner",
+      concern: "unclosed database query rows",
       category: "reliability",
       severity: "high",
       confidence: "high",
@@ -22,6 +23,7 @@ export const domain: DomainDefinition = {
     {
       id: "go-database.transaction-lifecycle",
       title: "A transaction has no rollback safety net",
+      concern: "transactions without deferred rollback",
       category: "correctness",
       severity: "high",
       confidence: "high",
@@ -33,6 +35,7 @@ export const domain: DomainDefinition = {
     {
       id: "go-database.contextless-query",
       title: "Database work cannot observe caller cancellation",
+      concern: "contextless database operations",
       category: "reliability",
       severity: "medium",
       confidence: "high",
