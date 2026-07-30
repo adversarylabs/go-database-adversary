@@ -1,5 +1,5 @@
 name: go/database
-version: 0.0.9
+version: 0.0.10
 description: Reviews Go database code for transaction, pool, query, cancellation, and migration safety.
 
 triggers:
