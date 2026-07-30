@@ -16439,6 +16439,42 @@ var domain = {
       whyItMatters: "Request, command, and worker cancellation must reach network waits and server-side query execution.",
       impact: "Timed-out work can continue consuming connections and database capacity.",
       recommendation: "Use QueryContext, ExecContext, or the library's context-aware equivalent with the owning context."
+    },
+    {
+      id: "go-database.sql-injection",
+      title: "SQL built with string formatting",
+      concern: "SQL injection",
+      category: "security",
+      severity: "critical",
+      confidence: "high",
+      summary: (count) => `${count} SQL construction${count === 1 ? "" : "s"} use string formatting.`,
+      whyItMatters: "User-controlled SQL fragments enable injection.",
+      impact: "Database compromise.",
+      recommendation: "Use bound parameters only."
+    },
+    {
+      id: "go-database.dsn-logging",
+      title: "Database DSN or password is logged",
+      concern: "credential logging",
+      category: "security",
+      severity: "high",
+      confidence: "high",
+      summary: (count) => `${count} log path${count === 1 ? "" : "s"} may emit DSN/password material.`,
+      whyItMatters: "Logs retain credentials longer than process memory.",
+      impact: "Credential theft from log sinks.",
+      recommendation: "Never log DSNs; redact connection strings."
+    },
+    {
+      id: "go-database.inline-dsn-password",
+      title: "Hardcoded password in DSN",
+      concern: "hardcoded DSN password",
+      category: "security",
+      severity: "critical",
+      confidence: "high",
+      summary: (count) => `${count} DSN literal${count === 1 ? "" : "s"} embed passwords.`,
+      whyItMatters: "Embedded DB passwords are extractable secrets.",
+      impact: "Database credential exposure.",
+      recommendation: "Load passwords from the environment or a secret manager."
     }
   ],
   noRiskSummary: "The reviewed database code has explicit row, transaction, and cancellation ownership.",
@@ -16450,7 +16486,10 @@ var domain = {
       signals: [
         ...rowsLifecycleSignals(file),
         ...tx,
-        ...contextlessQuerySignals(file)
+        ...contextlessQuerySignals(file),
+        ...lineSignals(file, "go-database.sql-injection", /(?:Query|Exec|QueryContext|ExecContext)\s*\(\s*(?:fmt\.Sprintf|["`].*\+)/, () => "SQL may be built via string formatting."),
+        ...lineSignals(file, "go-database.dsn-logging", /(?:log|slog|fmt)\.[A-Za-z]+\([^)]*(?:dsn|password|DATABASE_URL)/i, () => "A DSN or password may be logged."),
+        ...lineSignals(file, "go-database.inline-dsn-password", /(?:postgres|mysql|mongodb):\/\/[^\s"']+:[^\s"'@${]{3,}@/, () => "A DSN literal embeds a password.")
       ],
       positives: [
         ...positive(
