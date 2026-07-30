@@ -16475,6 +16475,18 @@ var domain = {
       whyItMatters: "Embedded DB passwords are extractable secrets.",
       impact: "Database credential exposure.",
       recommendation: "Load passwords from the environment or a secret manager."
+    },
+    {
+      id: "go-database.gorm-raw",
+      title: "GORM Raw/Exec builds SQL via concatenation",
+      concern: "GORM raw SQL injection",
+      category: "security",
+      severity: "critical",
+      confidence: "high",
+      summary: (count) => `${count} GORM Raw/Exec call${count === 1 ? "" : "s"} assemble SQL with string formatting or concatenation.`,
+      whyItMatters: "GORM Raw and Exec pass SQL through to the driver; concatenation reintroduces classic SQL injection.",
+      impact: "Database compromise via attacker-controlled SQL fragments.",
+      recommendation: 'Use bound parameters: db.Raw("\u2026 WHERE id = ?", id) or the expression builder.'
     }
   ],
   noRiskSummary: "The reviewed database code has explicit row, transaction, and cancellation ownership.",
@@ -16488,6 +16500,7 @@ var domain = {
         ...tx,
         ...contextlessQuerySignals(file),
         ...lineSignals(file, "go-database.sql-injection", /(?:Query|Exec|QueryContext|ExecContext)\s*\(\s*(?:fmt\.Sprintf|["`].*\+)/, () => "SQL may be built via string formatting."),
+        ...gormRawSignals(file),
         ...lineSignals(file, "go-database.dsn-logging", /(?:log|slog|fmt)\.[A-Za-z]+\([^)]*(?:dsn|password|DATABASE_URL)/i, () => "A DSN or password may be logged."),
         ...lineSignals(file, "go-database.inline-dsn-password", /(?:postgres|mysql|mongodb):\/\/[^\s"']+:[^\s"'@${]{3,}@/, () => "A DSN literal embeds a password.")
       ],
@@ -16650,6 +16663,41 @@ function stripGoComments(source) {
     i2 += 1;
   }
   return out2;
+}
+function gormRawSignals(file) {
+  if (file.path.endsWith("_test.go")) return [];
+  const hasGorm = /gorm\.io\/gorm|"github\.com\/jinzhu\/gorm"/.test(file.current) || /\b(?:db|tx)\s*\.\s*Raw\s*\(/.test(file.current);
+  if (!hasGorm && !/\.Raw\s*\(/.test(file.current)) return [];
+  const signals = [
+    // db.Raw(fmt.Sprintf(...)) or .Raw("..." + id) or .Raw(`...` + id)
+    ...lineSignals(
+      file,
+      "go-database.gorm-raw",
+      /\.Raw\s*\(\s*(?:fmt\.Sprintf|[`"'][^`"']*[`"']\s*\+)/,
+      () => "GORM Raw builds SQL via formatting or concatenation."
+    ),
+    // multi-arg concat: .Raw("select " + col + " from t") — string lit then +
+    ...lineSignals(
+      file,
+      "go-database.gorm-raw",
+      /\.Raw\s*\(\s*fmt\.Sprintf\s*\(/,
+      () => "GORM Raw uses fmt.Sprintf for SQL assembly."
+    ),
+    // gorm.DB.Exec with concat (same SQLi class; distinct from database/sql when gorm imported)
+    ...lineSignals(
+      file,
+      "go-database.gorm-raw",
+      /\.Exec\s*\(\s*(?:fmt\.Sprintf|[`"'][^`"']*[`"']\s*\+)/,
+      () => "GORM Exec builds SQL via formatting or concatenation."
+    ).filter(() => /gorm\.io\/gorm|"github\.com\/jinzhu\/gorm"/.test(file.current))
+  ];
+  const seen = /* @__PURE__ */ new Set();
+  return signals.filter((s) => {
+    const key = `${s.ruleId}:${s.path}:${s.line}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 function contextlessQuerySignals(file) {
   if (file.path.endsWith("_test.go")) return [];
