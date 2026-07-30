@@ -1,4 +1,4 @@
-name: go-database
+name: go/database
 version: 0.0.7
 description: Reviews Go database code for transaction, pool, query, cancellation, and migration safety.
 
