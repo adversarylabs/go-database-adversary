@@ -1,21 +1,44 @@
-# Go Database adversary
+# go/database
 
-Go Database reviews transactions, queries, pools, cancellation, and migrations across `database/sql`, pgx, sqlx, Bun, GORM, and sqlc.
+**go/database** reviews Go database code for **transaction, row, pool, query, and cancellation** safety across `database/sql`, pgx, sqlx, Bun, GORM, and sqlc.
 
-The initial review focuses on rows and transaction lifecycle ownership plus context-aware database operations.
+It is a **database domain reviewer**, not a schema linter. It prefers silence over style. When it reports, connection pools, transactions, or SQL boundaries are at risk.
 
-## Fixtures and calibration
+## What it does
 
-Five graded fixtures own expected review snapshots. The 61-repository corpus calibrates transaction and resource-lifecycle judgment across libraries and services.
+1. **Discovers** Go and SQL migration files relevant to DB access.
+2. **Runs deterministic detectors** for lifecycle ownership and SQL injection shapes.
+3. **Synthesizes a review** with severity, impact, and remediation.
+4. Optionally **enhances** with a model when provided.
 
-## Automatic detection
+It never executes the scanned project as the product under review, never installs dependencies into it, and never needs network access to the target repository.
 
-`adversary auto` selects Go Database for changed Go or SQL source. Runtime dependency and symbol context will later narrow this to database-relevant Go changes.
+## What it detects
 
-## Development
+Every **shipped rule id**, severity, and short description lives in **[CHECKS.md](CHECKS.md)** — the audit surface for “what does this adversary look for?”
 
-Run `npm test`, `adversary validate .`, and `adversary pack --check .`.
+Highlights:
 
-## Issue catalog
+| Area | Examples |
+| --- | --- |
+| Rows lifecycle | `Query`/`QueryContext` without `defer rows.Close()` |
+| Transactions | `Begin` without deferred `Rollback` |
+| Cancellation | Contextless Query/Exec APIs |
+| Injection | SQL string concat / `fmt.Sprintf`; GORM `Raw`/`Exec` concat |
+| Secrets | DSN passwords inline; DSN/password logging |
 
-What this adversary targets (P0 / P1 / LLM-only priorities, detection notes, and public pattern references) is documented in [docs/issue-catalog.md](docs/issue-catalog.md).
+### Ownership boundaries
+
+Other official adversaries own adjacent classes so findings stay non-duplicative:
+
+| Concern | Owned by |
+| --- | --- |
+| Generic SQL injection and TLS/crypto in non-DB code | [`go/security`](https://github.com/adversarylabs/go-security-adversary) |
+| HTTP body limits and client timeouts | [`go/http`](https://github.com/adversarylabs/go-http-adversary) |
+| Committed cloud keys and PATs | [`security/secrets`](https://github.com/adversarylabs/secrets-adversary) |
+
+## Precision stance
+
+- **High confidence** only for deterministic, evidence-backed patterns.
+- Clean fixtures must stay quiet; vulnerable fixtures must fire where graded fixtures exist.
+- Prefer missing a weak signal over a false positive on normal production code.
