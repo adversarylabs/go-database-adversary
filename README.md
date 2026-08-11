@@ -1,6 +1,6 @@
 # go/database
 
-**go/database** reviews Go database code for **transaction, row, pool, query, and cancellation** safety across `database/sql`, pgx, sqlx, Bun, GORM, and sqlc.
+**go/database** reviews Go database code for **transaction, row, pool, query, cancellation, migration, and replication** safety across `database/sql`, pgx, sqlx, Bun, GORM, and sqlc.
 
 It is a **database domain reviewer**, not a schema linter. It prefers silence over style. When it reports, connection pools, transactions, or SQL boundaries are at risk.
 
@@ -26,6 +26,7 @@ Highlights:
 | Cancellation | Contextless Query/Exec APIs |
 | Injection | SQL string concat / `fmt.Sprintf`; GORM `Raw`/`Exec` concat |
 | Secrets | DSN passwords inline; DSN/password logging |
+| Model-assisted migration review | Session state that changes how replicated DDL is evaluated |
 
 ### Ownership boundaries
 

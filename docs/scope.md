@@ -8,7 +8,7 @@ Source of truth for what this adversary is *for*.
 
 ## Mission
 
-Review Go database code for transactions, pools, queries, cancellation, and migrations.
+Review Go database code for transactions, pools, queries, cancellation, migrations, and replication-sensitive DDL behavior.
 
 ## In scope (fair miss if humans raised it and we did not)
 
@@ -17,10 +17,12 @@ Review Go database code for transactions, pools, queries, cancellation, and migr
 - Query cancellation; context not passed to DB
 - Unsafe string-built SQL in Go DB code
 - Migration safety issues
+- Session or connection state that can make replicated DDL evaluate differently on replicas
 
 ## Out of scope (not a miss for this adversary)
 
 - Non-DB concurrency
+- Generic distributed-systems compatibility without a database or DDL consequence
 - Secrets scanning
 - Non-Go
 

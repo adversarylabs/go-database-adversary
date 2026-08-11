@@ -84,7 +84,7 @@ test("injected model path applies assessment and preserves static findings", asy
       summary: "Adds judgment without inventing files.",
       whyItMatters: "Prepared evidence supports a maintainability or correctness nuance.",
       recommendation: "Address the model observation if the evidence still holds.",
-      evidenceIds: [],
+      evidenceIds: ["file:main.go"],
     }],
   });
   const first = await runWithModel(root, model);
@@ -99,4 +99,53 @@ test("injected model path applies assessment and preserves static findings", asy
   if (first.findings.some((f) => ["medium", "high", "critical"].includes(f.severity))) {
     assert.equal(first.opinion?.ship, false);
   }
+});
+
+test("model contract reviews replicated DDL session state with evidence gates", async () => {
+  assert.match(GO_DATABASE_MODEL_PROMPT, /replicas evaluate the replicated DDL under compatible state/);
+  assert.match(GO_DATABASE_MODEL_PROMPT, /omitted from a binlog is not enough by itself/);
+  assert.match(GO_DATABASE_MODEL_PROMPT, /replica appliers establish compatible\s+state/);
+  const schema = GO_DATABASE_MODEL_SCHEMA as {
+    properties: { observations: { items: { properties: { category: { enum: string[] } } } } };
+  };
+  assert.ok(schema.properties.observations.items.properties.category.enum.includes("replication"));
+
+  const root = await writeFixture("replicated-ddl", {
+    "apply.go": `package schema
+import "context"
+type conn interface { Exec(context.Context, string) error }
+func apply(ctx context.Context, primary conn) error {
+  if err := primary.Exec(ctx, "SET SESSION foreign_key_checks = 0"); err != nil { return err }
+  return primary.Exec(ctx, "ALTER TABLE child ADD CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parent(id)")
+}
+`,
+    "replica.go": `package schema
+import "context"
+func configureReplica(ctx context.Context, replica conn) error {
+  return replica.Exec(ctx, "SET SESSION foreign_key_checks = 1")
+}
+`,
+  });
+  const model = capturingModel({
+    assessment: { risk: "high", summary: "The replicated DDL can be evaluated under different session state." },
+    ship: false,
+    primaryConcern: "replica DDL evaluation",
+    observations: [{
+      id: "ddl-session-state",
+      title: "Replicas may evaluate DDL under different state",
+      category: "replication",
+      severity: "high",
+      confidence: "medium",
+      summary: "The primary changes validation state before DDL, but prepared evidence shows no compatible replica state.",
+      whyItMatters: "A replica can reject the statement and stop replication.",
+      recommendation: "Deny the state change or establish equivalent replica-applier semantics.",
+      evidenceIds: ["file:apply.go", "file:replica.go"],
+    }],
+  });
+  const result = await runWithModel(root, model);
+  const observation = result.observations.find((item) => item.key === "go-database.model.ddl-session-state");
+  assert.equal(observation?.metadata?.category, "replication");
+  assert.equal(observation?.evidence?.[0]?.location?.file, "apply.go");
+  assert.equal(observation?.evidence?.[1]?.location?.file, "replica.go");
+  assert.equal(result.opinion?.ship, false);
 });
