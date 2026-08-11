@@ -23,6 +23,8 @@ Authority:
 - context-aware database/sql Query/Exec (and known ORMs/drivers: pgx, sqlx, GORM, Bun, sqlc)
 - pool configuration and connection lifecycle
 - migrations only when they create operational risk visible in the change
+- replication safety when Go code applies session or connection state around DDL: determine whether
+  replicas evaluate the replicated DDL under compatible state
 
 Emphasize the classic leak: selecting many rows into a variable then forgetting defer Close.
 QueryRow/*Row do not need Close; multi-row Query/QueryContext do.
@@ -33,6 +35,10 @@ Hard exclusions — NEVER treat these as database operations:
 - *_test.go fixtures that only exercise URL query maps
 
 If you cannot tell SQL from HTTP query strings, emit no observation.
+For replication findings, require changed evidence that connects session state to replicated DDL and
+concrete prepared evidence that primary and replica evaluation can differ. A variable being SESSION or
+omitted from a binlog is not enough by itself. Stay quiet when replica appliers establish compatible
+state, the DDL is explicitly local/non-replicated, or the server/applier behavior is not evidenced.
 Do NOT review generic Go style, HTTP, or CLI UX.
 Prefer silence over speculation. Zero to six observations. Cite only evidenceIds.
 Do not restate deterministic signals without added judgment.
@@ -86,6 +92,7 @@ export const GO_DATABASE_MODEL_SCHEMA: Record<string, unknown> = {
               "context",
               "pool",
               "migration",
+              "replication",
               "completeness",
             ],
           },

@@ -85,3 +85,18 @@ Regression entry: graded fixtures and corpus under `test/`.
 | **Looks for** | Query/Exec without Context variants |
 | **Stays quiet when** | QueryContext/ExecContext with owning ctx |
 | **Remediation** | Always pass request/worker context |
+
+---
+
+## Model-assisted review
+
+### Replicated DDL session state
+
+| | |
+| --- | --- |
+| **What** | Session or connection state applied around DDL can make primary and replica evaluation differ |
+| **Why** | Replicas can reject a statement accepted on the primary, stop replication, or materialize different schema semantics |
+| **Looks for** | Changed Go paths that establish session state before replicated DDL, with concrete prepared evidence of incompatible replica behavior |
+| **Stays quiet when** | Replica appliers establish compatible state; DDL is explicitly local/non-replicated; or server/applier behavior is not evidenced in the prepared change |
+| **Public example** | [Vitess PR 20654](https://github.com/vitessio/vitess/pull/20654), whose review resolved a session-variable concern by verifying the replica applier's effective state |
+| **Remediation** | Deny unsafe session state, propagate equivalent semantics, or prove and document the replica-applier invariant |

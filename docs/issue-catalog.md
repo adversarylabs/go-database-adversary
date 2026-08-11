@@ -31,7 +31,7 @@ Evidence required; LLM-only defaults medium/low; when unsure omit.
 
 - **P0 implement:** `sql.injection-fmt`, `gorm.raw`, `tx.missing-rollback`, `rows.not-closed`, `secrets.inline-dsn`, `dsn.password-log`
 - **P1:** `sql.injection-builder`, `tx.missing-context`, `conn.max-lifetime`, `conn.max-open-zero`, `migrate.unsafe`, `nullable.unchecked`, `context.todo`, `tx.nested`, `batch.no-limit`, `error.leak`, `ping.missing`
-- **LLM-only:** `n-plus-one`, `isolation.default`, `soft-delete.bypass`, `migration.lossy`, `read-replica.stale`, `tx.slow-work-inside`
+- **LLM-only:** `n-plus-one`, `isolation.default`, `soft-delete.bypass`, `migration.lossy`, `read-replica.stale`, `tx.slow-work-inside`, `replication.ddl-session-state`
 - **Cut:** `prepared.missing` — database/sql and pgx already cache prepared statements; pure noise. `pgx.simple-protocol` — pgx sanitizes parameters in simple-protocol mode; esoteric with no clear exploit story. `time.now-sql` — vague and unactionable as a finding.
 
 ## Issue catalog
@@ -518,6 +518,25 @@ Evidence required; LLM-only defaults medium/low; when unsure omit.
   - https://go.dev/doc/database/execute-transactions
   - https://www.postgresql.org/docs/current/explicit-locking.html
   - https://github.com/jackc/pgx
+
+---
+### 24. `go-db.replication.ddl-session-state` — Replicated DDL depends on primary-only session state
+
+| Field | Value |
+| --- | --- |
+| **Severity** | high |
+| **Target confidence** | medium |
+
+**What it is.** Go schema-management code establishes session or connection state before DDL, but replicas can evaluate the replicated statement under incompatible state.
+
+**Static detection.** None; variable names and binlog metadata alone do not establish effective replica behavior.
+
+**LLM role.** Connect the changed DDL path, session assignment, and concrete replica-applier evidence. Explain the resulting replication stop or schema divergence.
+
+**False-positive guards.** Replica appliers explicitly establish compatible state; the DDL is local or not replicated; effective server behavior is absent from prepared evidence.
+
+**Public example:**
+  - https://github.com/vitessio/vitess/pull/20654
 
 ---
 
