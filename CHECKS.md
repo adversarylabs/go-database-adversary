@@ -54,6 +54,17 @@ Regression entry: graded fixtures and corpus under `test/`.
 
 ## High
 
+### `go-database.rows-iteration-error`
+
+| | |
+| --- | --- |
+| **What** | Row iteration errors silently truncate query results |
+| **Why** | `Next()` stops for both exhaustion and driver errors; only `Err()` distinguishes them |
+| **Looks for** | A local `Query`/`QueryContext`/`Queryx` result used in a `Next()` loop without an `Err()` observation |
+| **Stays quiet when** | `rows.Err()` is observed, rows ownership escapes, or the call is `QueryRow` |
+| **Fixture** | `test/rows-close.test.ts` |
+| **Remediation** | Check and handle `rows.Err()` after the loop |
+
 ### `go-database.transaction-lifecycle`
 
 | | |

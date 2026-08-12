@@ -11,6 +11,11 @@ func load(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	defer rows.Close()
+	for rows.Next() {
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
