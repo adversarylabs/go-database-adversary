@@ -17239,7 +17239,7 @@ function rowsLifecycleSignals(file) {
 function rowsIterationErrorSignals(file) {
   if (file.path.endsWith("_test.go")) return [];
   if (!hasDatabaseImport(file.current)) return [];
-  const source = stripGoComments(file.current);
+  const source = stripGoComments(file.current, true);
   const assignRe = /\b([A-Za-z_]\w*)\s*,\s*(?:err|_)\s*:?=\s*[^\n;]*?\.(?:Query|QueryContext|Queryx|QueryxContext)\s*\(/g;
   const signals = [];
   let match;
@@ -17321,7 +17321,7 @@ function hasDeferredRowsClose(source, assignIndex, varName) {
   }
   return false;
 }
-function stripGoComments(source) {
+function stripGoComments(source, stripStringContents = false) {
   let out2 = "";
   let i2 = 0;
   let inLine = false;
@@ -17355,13 +17355,13 @@ function stripGoComments(source) {
       continue;
     }
     if (inRaw) {
-      out2 += ch;
+      out2 += stripStringContents ? ch === "\n" ? "\n" : " " : ch;
       if (ch === "`") inRaw = false;
       i2 += 1;
       continue;
     }
     if (inInterp) {
-      out2 += ch;
+      out2 += stripStringContents ? ch === "\n" ? "\n" : " " : ch;
       if (escape2) {
         escape2 = false;
         i2 += 1;
@@ -17377,7 +17377,7 @@ function stripGoComments(source) {
       continue;
     }
     if (inChar) {
-      out2 += ch;
+      out2 += stripStringContents ? ch === "\n" ? "\n" : " " : ch;
       if (escape2) {
         escape2 = false;
         i2 += 1;
@@ -17406,19 +17406,19 @@ function stripGoComments(source) {
     }
     if (ch === "`") {
       inRaw = true;
-      out2 += ch;
+      out2 += stripStringContents ? " " : ch;
       i2 += 1;
       continue;
     }
     if (ch === '"') {
       inInterp = true;
-      out2 += ch;
+      out2 += stripStringContents ? " " : ch;
       i2 += 1;
       continue;
     }
     if (ch === "'") {
       inChar = true;
-      out2 += ch;
+      out2 += stripStringContents ? " " : ch;
       i2 += 1;
       continue;
     }
