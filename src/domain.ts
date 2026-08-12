@@ -190,7 +190,7 @@ function rowsLifecycleSignals(file: SourceRevision) {
 function rowsIterationErrorSignals(file: SourceRevision) {
   if (file.path.endsWith("_test.go")) return [];
   if (!hasDatabaseImport(file.current)) return [];
-  const source = stripGoComments(file.current);
+  const source = stripGoComments(file.current, true);
   const assignRe =
     /\b([A-Za-z_]\w*)\s*,\s*(?:err|_)\s*:?=\s*[^\n;]*?\.(?:Query|QueryContext|Queryx|QueryxContext)\s*\(/g;
   const signals: ReturnType<typeof contentSignal> = [];
@@ -287,8 +287,11 @@ export function hasDeferredRowsClose(source: string, assignIndex: number, varNam
   return false;
 }
 
-/** Remove // and /* comments so "forgot: defer rows.Close()" in comments is not a real Close. */
-export function stripGoComments(source: string): string {
+/**
+ * Remove comments while preserving byte offsets and line numbers. Optionally
+ * blank quoted literal contents for detectors that search for Go syntax.
+ */
+export function stripGoComments(source: string, stripStringContents = false): string {
   let out = "";
   let i = 0;
   let inLine = false;
@@ -322,13 +325,13 @@ export function stripGoComments(source: string): string {
       continue;
     }
     if (inRaw) {
-      out += ch;
+      out += stripStringContents ? (ch === "\n" ? "\n" : " ") : ch;
       if (ch === "`") inRaw = false;
       i += 1;
       continue;
     }
     if (inInterp) {
-      out += ch;
+      out += stripStringContents ? (ch === "\n" ? "\n" : " ") : ch;
       if (escape) {
         escape = false;
         i += 1;
@@ -344,7 +347,7 @@ export function stripGoComments(source: string): string {
       continue;
     }
     if (inChar) {
-      out += ch;
+      out += stripStringContents ? (ch === "\n" ? "\n" : " ") : ch;
       if (escape) {
         escape = false;
         i += 1;
@@ -373,19 +376,19 @@ export function stripGoComments(source: string): string {
     }
     if (ch === "`") {
       inRaw = true;
-      out += ch;
+      out += stripStringContents ? " " : ch;
       i += 1;
       continue;
     }
     if (ch === '"') {
       inInterp = true;
-      out += ch;
+      out += stripStringContents ? " " : ch;
       i += 1;
       continue;
     }
     if (ch === "'") {
       inChar = true;
-      out += ch;
+      out += stripStringContents ? " " : ch;
       i += 1;
       continue;
     }
