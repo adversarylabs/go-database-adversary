@@ -17112,6 +17112,18 @@ var domain = {
       recommendation: "Defer Rollback immediately after Begin succeeds; treat the expected post-Commit rollback error as harmless."
     },
     {
+      id: "go-database.rows-iteration-error",
+      title: "Row iteration errors are discarded",
+      concern: "unchecked database row iteration errors",
+      category: "correctness",
+      severity: "high",
+      confidence: "high",
+      summary: (count) => `${count} multi-row query loop${count === 1 ? " does" : "s do"} not check the row iterator's final error.`,
+      whyItMatters: "Next stops for both normal exhaustion and driver errors; only Err distinguishes a complete result from a truncated one.",
+      impact: "Callers can accept incomplete query results as complete and make decisions from silently missing rows.",
+      recommendation: "After the Next loop, check and return or otherwise handle `rows.Err()`."
+    },
+    {
       id: "go-database.contextless-query",
       title: "Database work cannot observe caller cancellation",
       concern: "contextless database operations",
@@ -17180,6 +17192,7 @@ var domain = {
     return {
       signals: [
         ...rowsLifecycleSignals(file),
+        ...rowsIterationErrorSignals(file),
         ...tx,
         ...contextlessQuerySignals(file),
         ...lineSignals(file, "go-database.sql-injection", /(?:Query|Exec|QueryContext|ExecContext)\s*\(\s*(?:fmt\.Sprintf|["`].*\+)/, () => "SQL may be built via string formatting."),
@@ -17223,9 +17236,76 @@ function rowsLifecycleSignals(file) {
   }
   return signals;
 }
+function rowsIterationErrorSignals(file) {
+  if (file.path.endsWith("_test.go")) return [];
+  if (!hasDatabaseImport(file.current)) return [];
+  const source = stripGoComments(file.current);
+  const assignRe = /\b([A-Za-z_]\w*)\s*,\s*(?:err|_)\s*:?=\s*[^\n;]*?\.(?:Query|QueryContext|Queryx|QueryxContext)\s*\(/g;
+  const signals = [];
+  let match;
+  while ((match = assignRe.exec(source)) !== null) {
+    const varName = match[1] ?? "";
+    if (varName === "" || varName === "_") continue;
+    const rest = source.slice(match.index + match[0].length);
+    const nextFunc = rest.search(/\nfunc(?:\s|\()/);
+    const scope = nextFunc === -1 ? rest : rest.slice(0, nextFunc);
+    const escaped = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const loopRe = new RegExp(`\\bfor\\s+${escaped}\\.Next\\s*\\(\\s*\\)\\s*\\{`);
+    const loop = loopRe.exec(scope);
+    if (loop === null) continue;
+    const openBrace = loop.index + loop[0].lastIndexOf("{");
+    const loopEnd = goBlockEnd(scope, openBrace);
+    if (new RegExp(`\\b${escaped}\\.Err\\s*\\(`).test(scope.slice(loopEnd))) continue;
+    if (rowsOwnershipEscapes(scope, escaped)) continue;
+    const loopIndex = match.index + match[0].length + loop.index;
+    const line = source.slice(0, loopIndex).split("\n").length;
+    signals.push({
+      ruleId: "go-database.rows-iteration-error",
+      path: file.path,
+      line,
+      message: `The ${varName}.Next() loop never checks ${varName}.Err(); an iteration failure looks like a complete result.`,
+      snippet: source.slice(loopIndex, loopIndex + (loop[0]?.length ?? 0)).trim(),
+      data: { variable: varName }
+    });
+  }
+  return signals;
+}
+function goBlockEnd(source, openBrace) {
+  let depth = 0;
+  let quote;
+  let escaped = false;
+  for (let index = openBrace; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote !== void 0) {
+      if (quote !== "`" && escaped) {
+        escaped = false;
+      } else if (quote !== "`" && char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = void 0;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}" && --depth === 0) {
+      return index + 1;
+    }
+  }
+  return source.length;
+}
+function rowsOwnershipEscapes(scope, escapedVarName) {
+  if (new RegExp(`\\breturn\\s+${escapedVarName}\\b`).test(scope)) return true;
+  if (new RegExp(`(?:^|[,;{}\\n])\\s*[A-Za-z]\\w*(?:\\.[A-Za-z_]\\w*)?\\s*:?=\\s*${escapedVarName}\\b(?!\\s*\\.)`, "m").test(scope)) {
+    return true;
+  }
+  return new RegExp(`(?:\\(|,)\\s*${escapedVarName}\\s*(?:,|\\))`).test(scope);
+}
 function hasDeferredRowsClose(source, assignIndex, varName) {
   const rest = stripGoComments(source.slice(assignIndex));
-  const nextFunc = rest.search(/\nfunc\s+/);
+  const nextFunc = rest.search(/\nfunc(?:\s|\()/);
   const scope = nextFunc === -1 ? rest : rest.slice(0, nextFunc);
   const escaped = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (new RegExp(`\\bdefer\\s+${escaped}\\.Close\\s*\\(`).test(scope)) return true;

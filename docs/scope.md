@@ -13,7 +13,7 @@ Review Go database code for transactions, pools, queries, cancellation, migratio
 ## In scope (fair miss if humans raised it and we did not)
 
 - Transaction boundaries; missing rollback
-- Pool misconfiguration; connection leaks
+- Pool misconfiguration; connection leaks; discarded row iteration errors
 - Query cancellation; context not passed to DB
 - Unsafe string-built SQL in Go DB code
 - Migration safety issues

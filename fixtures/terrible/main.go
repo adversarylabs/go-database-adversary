@@ -11,7 +11,8 @@ func transfer(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	rows, err := db.QueryContext(ctx, "select id from jobs")
-	_ = rows
+	for rows.Next() {
+	}
 	_, _ = tx.Exec("update accounts set balance = 0")
 	return err
 }

@@ -102,3 +102,90 @@ func load(ctx context.Context, db *sql.DB) error {
   const output = await createApp().run({ input: { source: { path: root } }, includeRawObservations: true });
   assert.equal(output.findings.some((f) => f.ruleId === "go-database.rows-lifecycle"), false);
 });
+
+test("Next loop without Err check reports silent row truncation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "go-db-rows-err-"));
+  await writeFile(
+    join(root, "main.go"),
+    `package main
+
+import (
+	"context"
+	"database/sql"
+)
+
+func load(ctx context.Context, db *sql.DB) ([]int, error) {
+	rows, err := db.QueryContext(ctx, "select id from jobs")
+	if err != nil { return nil, err }
+	defer rows.Close()
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil { return nil, err }
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+`,
+  );
+  const output = await createApp().run({ input: { source: { path: root } }, includeRawObservations: true });
+  const finding = output.findings.find((f) => f.ruleId === "go-database.rows-iteration-error");
+  assert.ok(finding, `expected rows-iteration-error, got ${JSON.stringify(output.findings, null, 2)}`);
+  assert.equal(finding.severity, "high");
+});
+
+test("explicit Err check and escaped rows ownership stay clean", async () => {
+  const root = await mkdtemp(join(tmpdir(), "go-db-rows-err-ok-"));
+  await writeFile(
+    join(root, "main.go"),
+    `package main
+
+import (
+	"context"
+	"database/sql"
+)
+
+func load(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "select id from jobs")
+	if err != nil { return err }
+	defer rows.Close()
+	for rows.Next() {}
+	return rows.Err()
+}
+
+func handOff(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "select id from jobs")
+	if err != nil { return err }
+	consume(rows)
+	for rows.Next() {}
+	return nil
+}
+
+func consume(*sql.Rows) {}
+`,
+  );
+  const output = await createApp().run({ input: { source: { path: root } }, includeRawObservations: true });
+  assert.equal(output.findings.some((f) => f.ruleId === "go-database.rows-iteration-error"), false);
+});
+
+test("Err observed before iteration does not replace the final Err check", async () => {
+  const root = await mkdtemp(join(tmpdir(), "go-db-rows-err-order-"));
+  await writeFile(
+    join(root, "main.go"),
+    `package main
+
+import "database/sql"
+
+func load(db *sql.DB) error {
+	rows, err := db.Query("select id from jobs")
+	if err != nil { return err }
+	defer rows.Close()
+	_ = rows.Err()
+	for rows.Next() {}
+	return nil
+}
+`,
+  );
+  const output = await createApp().run({ input: { source: { path: root } }, includeRawObservations: true });
+  assert.ok(output.findings.some((f) => f.ruleId === "go-database.rows-iteration-error"));
+});
