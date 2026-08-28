@@ -1,5 +1,5 @@
 name: adversarylabs/go/database
-version: 0.0.18
+version: 0.0.19
 description: Reviews Go database code for transaction, pool, query, cancellation, and migration safety.
 
 triggers:
